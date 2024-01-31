@@ -7,7 +7,7 @@ using GraphRecipes
 using Statistics
 using Distributions
 
-using .RecursiveCausalDiscovery
+using RecursiveCausalDiscovery
 
 """
     gen_er_dag_adj_mat(num_vars::Int, edge_prob::Float64)

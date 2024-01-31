@@ -4,6 +4,8 @@ using Graphs
 using DataFrames
 using LinearAlgebra
 
+export RSL
+export learn_and_get_skeleton!
 
 """
     find_markov_boundary_matrix(data::DataFrame, ci_test)
