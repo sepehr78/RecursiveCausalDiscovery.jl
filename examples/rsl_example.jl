@@ -100,4 +100,4 @@ ci_test = (x, y, z, data) -> fisher_z(x, y, z, data, 2 / size(data, 1)^2)
 rsl = RSL(df, ci_test)
 
 # Learn the skeleton
-skeleton = learn_and_get_skeleton!(rsl, df)  # potentially not working
+skeleton = learn_and_get_skeleton!(rsl, df)

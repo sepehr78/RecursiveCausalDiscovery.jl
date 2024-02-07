@@ -203,7 +203,7 @@ function find_removable(rsl::RSL, var_idx_list::Vector{Int})::Int
     """
 
     # Sort variables by the size of their Markov boundary
-    mb_size = sum(rsl.markov_boundary_matrix[var_idx_list, :], dims=2)
+    mb_size = sum(rsl.markov_boundary_matrix[var_idx_list, :], dims=2)[:,1]
     sort_indices = sortperm(mb_size, alg=QuickSort, by=x->-x) # Sorting in descending order
     sorted_var_idx = var_idx_list[sort_indices]
 
