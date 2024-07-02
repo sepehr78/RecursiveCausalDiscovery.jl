@@ -10,7 +10,7 @@ export learn_and_get_skeleton
 const global REMOVABLE_NOT_FOUND = -1
 
 """
-    find_markov_boundary_matrix!(maahrkov_boundary_matrix::Matrix{Int}, data, ci_test)
+    find_markov_boundary_matrix!(markov_boundary_matrix::Matrix{Int}, data, ci_test)
 
 Computes the Markov boundary matrix for all variables in-place.
 
@@ -120,6 +120,9 @@ function learn_and_get_skeleton(data, ci_test::Function; mkbd_ci_test::Function=
 end
 
 """
+    find_neighborhood(rsl, var_idx)
+
+
 Find the neighborhood of a variable using Lemma 4 of the rsl paper.
 
 # Arguments
@@ -204,6 +207,8 @@ function find_removable!(rsl::RSL, var_idx_list::AbstractVector{Int})::Int
 end
 
 """
+    update_markov_boundary_matrix!(rsl, var_idx, var_neighbors)
+
 Update the Markov boundary matrix after removing a variable.
 
 # Arguments
