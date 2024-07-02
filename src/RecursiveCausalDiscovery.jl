@@ -39,15 +39,15 @@ RSL class for learning graph structure.
 - `markov_boundary_matrix`: Matrix indicating whether variable i is in the Markov boundary of j.
 - `skip_rem_check_vec`: Used to keep track of which variables to skip when checking for removability. Speeds up the algorithm.
 """
-struct RSL{T}
+struct RSL{T, F}
     data::Matrix{T}
-    ci_test::Function
+    ci_test::F
     markov_boundary_matrix::BitMatrix
     skip_rem_check_vec::BitVector
 
     function RSL(data::Matrix{T}, ci_test::Function) where T
         num_vars = size(data, 2)
-        new{T}(data, ci_test, falses(num_vars, num_vars), falses(num_vars))
+        new{T, typeof(ci_test)}(data, ci_test, falses(num_vars, num_vars), falses(num_vars))
     end
 end
 
