@@ -1,4 +1,5 @@
 module RecursiveCausalDiscovery
+include("utils.jl")
 using Graphs
 using Tables
 using LinearAlgebra
@@ -9,7 +10,7 @@ export learn_and_get_skeleton
 const global REMOVABLE_NOT_FOUND = -1
 
 """
-    find_markov_boundary_matrix!(markov_boundary_matrix::Matrix{Int}, data, ci_test)
+    find_markov_boundary_matrix!(maahrkov_boundary_matrix::Matrix{Int}, data, ci_test)
 
 Computes the Markov boundary matrix for all variables in-place.
 
@@ -38,21 +39,17 @@ RSL class for learning graph structure.
 - `markov_boundary_matrix`: Matrix indicating whether variable i is in the Markov boundary of j.
 - `skip_rem_check_vec`: Used to keep track of which variables to skip when checking for removability. Speeds up the algorithm.
 """
-struct RSL{T, F}
+struct RSL{T}
     data::Matrix{T}
-    ci_test::F
+    ci_test::Function
     markov_boundary_matrix::BitMatrix
     skip_rem_check_vec::BitVector
 
     function RSL(data::Matrix{T}, ci_test::Function) where T
         num_vars = size(data, 2)
-        new{T, typeof(ci_test)}(data, ci_test, falses(num_vars, num_vars), falses(num_vars))
+        new{T}(data, ci_test, falses(num_vars, num_vars), falses(num_vars))
     end
 end
-
-
-_to_matrix(x) = Tables.matrix(x)
-_to_matrix(x::Matrix) = x
 
 
 """
@@ -69,7 +66,7 @@ Runs the algorithm on the data to learn and return the learned skeleton graph.
 """
 function learn_and_get_skeleton(data, ci_test::Function; mkbd_ci_test::Function=ci_test)::SimpleGraph
     Tables.istable(data) || throw(ArgumentError("Argument does not support Tables.jl"))
-    data_mat = _to_matrix(data) 
+    data_mat = Tables.matrix(data)
     num_vars = size(data_mat, 2)
 
     rsl = RSL(data_mat, ci_test)

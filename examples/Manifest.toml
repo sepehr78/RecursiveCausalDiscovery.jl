@@ -1304,10 +1304,10 @@ uuid = "01d81517-befc-4cb6-b9ec-a95719d0359c"
 version = "0.6.12"
 
 [[deps.RecursiveCausalDiscovery]]
-deps = ["Graphs", "InvertedIndices", "LinearAlgebra", "Tables"]
+deps = ["CSV", "Distributions", "Graphs", "LinearAlgebra", "Random", "Statistics", "Tables"]
 path = ".."
 uuid = "96483cbc-aa6d-4394-9266-bb69d9075284"
-version = "0.1.0"
+version = "0.2.0"
 
 [[deps.Reexport]]
 git-tree-sha1 = "45e428421666073eab6f2da5c9d310d99bb12f9b"

@@ -1,17 +1,58 @@
 using RecursiveCausalDiscovery
-
 using Test
-
+using Statistics
+using Tables
+using CSV
+using Graphs
 
 # navigate with your shell in the main directory of the package
 # First run: using Pkg; Pkg.activate("."); using TestEnv; TestEnv.activate(); include("test/runtests.jl")
 # Second run: include("test/runtests.jl")
 
+function test_data(folder_name)
+    matrix_data = CSV.read(joinpath(folder_name, "data.csv"), Tables.matrix)
+    table_data = Tables.table(matrix_data)
 
-@testset "Some unit tests" begin
-    @test 1 == SimpleGraph{Int64}(91, [Int64[], [50, 77], [63, 76, 97], [98], [21, 79, 82, 99], [29, 64], [16, 17, 45, 76, 96], [35, 45, 84], Int64[], [61], [60, 71], [30, 41, 73], [36], [24, 95], [54], [7, 43, 90], [7, 29, 97], [32], [33, 85], Int64[], [5], Int64[], [73], [14, 76], [100], Int64[], [70], [32, 62], [6, 17, 55], [12], Int64[], [18, 28], [19], [58], [8], [13, 48], [61, 86], Int64[], [99], [68, 88], [12, 46, 65], Int64[], [16, 53, 76, 84, 90], [55, 78, 97], [7, 8], [41, 71, 76], [73, 74, 77], [36], [59], [2], [68], Int64[], [43], [15], [29, 44, 76, 85, 98], [80], [70, 88], [34], [49, 87], [11, 88, 97], [10, 37], [28], [3, 90], [6], [41], Int64[], [69, 74], [40, 51, 85], [67], [27, 57], [11, 46], [100], [12, 23, 47], [47, 67, 82], Int64[], [3, 7, 24, 43, 46, 55, 89], [2, 47, 87], [44, 93], [5], [56], [82], [5, 74, 81], [87], [8, 43, 85], [19, 55, 68, 84, 89], [37], [59, 77, 83], [40, 57, 60], [76, 85], [16, 43, 63, 99], [95], Int64[], [78], Int64[], [14, 91], [7], [3, 17, 44, 60], [4, 55], [5, 39, 90], [25, 72]])
+    sig_level = 2 / size(matrix_data, 2)^2
+    ci_test = (x::Int, y::Int, z::Vector{Int}, data::Matrix{Float64}) -> fisher_z(x, y, z, data, sig_level)
+
+    precision_mat = inv(cor(matrix_data))
+    opt_ci_test = (x::Int, y::Int, z::Vector{Int}, data::Matrix{Float64}) -> opt_fisher_z(x, y, z, size(matrix_data, 1), precision_mat, sig_level)
+
+    # learn the skeleton using RSL
+    rsl_skeleton = learn_and_get_skeleton(table_data, ci_test, mkbd_ci_test=opt_ci_test)
+
+    # load true adjacency matrix from csv
+    true_adj_mat = Int.(CSV.read(joinpath(folder_name, "true_adj_mat.csv"), Tables.matrix, header=false))
+    true_skeleton = Graph(true_adj_mat)
+
+    # calculate f1 score
+    rsl_f1 = f1_score(true_skeleton, rsl_skeleton)
+    return rsl_f1
 end
 
-@testset "Some smaller finer tests" begin
-    @test true
+
+@testset "RSL test n=10" begin
+    folder_name = "n_10"
+    @test test_data(folder_name) == 1.0
+end
+
+@testset "RSL test n=20" begin
+    folder_name = "n_20"
+    @test test_data(folder_name) == 1.0
+end
+
+@testset "RSL test n=50" begin
+    folder_name = "n_50"
+    @test test_data(folder_name) == 1.0
+end
+
+@testset "RSL test n=100" begin
+    folder_name = "n_100"
+    @test test_data(folder_name) == 1.0
+end
+
+@testset "RSL test n=200" begin
+    folder_name = "n_200"
+    @test test_data(folder_name) == 0.9698375870069604
 end
