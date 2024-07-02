@@ -74,6 +74,6 @@ pc_f1 = f1_score(true_skeleton, pc_skeleton)
 println("RSL F1 Score: ", rsl_f1)
 println("PC F1 Score: ", pc_f1)
 
-@benchmark learn_and_get_skeleton(table_data, ci_test, mkbd_ci_test=opt_ci_test)
-@benchmark get_pc_skeleton(table_data, sig_level, gausscitest)
+#@benchmark learn_and_get_skeleton(table_data, ci_test, mkbd_ci_test=opt_ci_test)
+#@benchmark get_pc_skeleton(table_data, sig_level, gausscitest)
 
