@@ -18,7 +18,7 @@ Computes the Markov boundary matrix for all variables in-place.
 - `data::DataFrame`: DataFrame where each column is a variable.
 - `ci_test`: Conditional independence test to use.
 """
-function find_markov_boundary_matrix!(markov_boundary_matrix::BitMatrix, data::AbstractMatrix{T}, ci_test::Function) where T
+function find_markov_boundary_matrix!(markov_boundary_matrix::BitMatrix, data::AbstractMatrix, ci_test::Function)
     num_vars = size(data, 2)
     
     @threads for i in 1:(num_vars - 1)
@@ -50,6 +50,11 @@ struct RSL{T, F}
     end
 end
 
+
+_to_matrix(x) = Tables.matrix(x)
+_to_matrix(x::Matrix) = x
+
+
 """
     learn_and_get_skeleton(data, ci_test)::Graph
 
@@ -64,7 +69,7 @@ Runs the algorithm on the data to learn and return the learned skeleton graph.
 """
 function learn_and_get_skeleton(data, ci_test::Function; mkbd_ci_test::Function=ci_test)::SimpleGraph
     Tables.istable(data) || throw(ArgumentError("Argument does not support Tables.jl"))
-    data_mat = Tables.matrix(data)
+    data_mat = _to_matrix(data) 
     num_vars = size(data_mat, 2)
 
     rsl = RSL(data_mat, ci_test)
