@@ -18,7 +18,7 @@ Computes the Markov boundary matrix for all variables in-place.
 - `data::DataFrame`: DataFrame where each column is a variable.
 - `ci_test`: Conditional independence test to use.
 """
-function find_markov_boundary_matrix!(markov_boundary_matrix::BitMatrix, data::Matrix{Float64}, ci_test::Function)
+function find_markov_boundary_matrix!(markov_boundary_matrix::BitMatrix, data::Matrix{T}, ci_test::Function) where T
     num_vars = size(data, 2)
     
     @threads for i in 1:(num_vars - 1)
@@ -38,15 +38,15 @@ RSL class for learning graph structure.
 - `markov_boundary_matrix`: Matrix indicating whether variable i is in the Markov boundary of j.
 - `skip_rem_check_vec`: Used to keep track of which variables to skip when checking for removability. Speeds up the algorithm.
 """
-struct RSL
-    data::Matrix{Float64}
-    ci_test::Function
+struct RSL{T, F}
+    data::Matrix{T}
+    ci_test::F
     markov_boundary_matrix::BitMatrix
     skip_rem_check_vec::BitVector
 
-    function RSL(data::Matrix{Float64}, ci_test::Function)
+    function RSL(data::Matrix{T}, ci_test::Function) where T
         num_vars = size(data, 2)
-        new(Float64.(data), ci_test, falses(num_vars, num_vars), falses(num_vars))
+        new{T, typeof(ci_test)}(data, ci_test, falses(num_vars, num_vars), falses(num_vars))
     end
 end
 
