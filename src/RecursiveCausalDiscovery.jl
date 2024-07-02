@@ -1,152 +1,148 @@
 module RecursiveCausalDiscovery
-
 using Graphs
-using DataFrames
+using Tables
 using LinearAlgebra
+using Base.Threads
 
-export RSL
-export learn_and_get_skeleton!
+export learn_and_get_skeleton
+
+const global REMOVABLE_NOT_FOUND = -1
 
 """
-    find_markov_boundary_matrix(data::DataFrame, ci_test)
+    find_markov_boundary_matrix!(markov_boundary_matrix::Matrix{Int}, data, ci_test)
 
-Computes the Markov boundary matrix for all variables.
+Computes the Markov boundary matrix for all variables in-place.
 
 # Arguments
+- `markov_boundary_matrix::Matrix{Int}`: Pre-allocated matrix to be updated.
 - `data::DataFrame`: DataFrame where each column is a variable.
 - `ci_test`: Conditional independence test to use.
-
-# Returns
-- `Matrix{Int}`: A matrix indicating whether variable i is in the Markov boundary of j.
 """
-function find_markov_boundary_matrix(data::DataFrame, ci_test)
+function find_markov_boundary_matrix!(markov_boundary_matrix::BitMatrix, data::Matrix{Float64}, ci_test::Function)
     num_vars = size(data, 2)
-    var_names = names(data)
-    markov_boundary_matrix = zeros(Int, num_vars, num_vars)
-
-    for i in 1:(num_vars - 1)
-        var_name = var_names[i]
+    
+    @threads for i in 1:(num_vars - 1)
         for j in (i + 1):num_vars
-            var_name2 = var_names[j]
-            cond_set = setdiff(var_names, [var_name, var_name2])
-            if !ci_test(var_name, var_name2, cond_set, data)
-                markov_boundary_matrix[i, j] = 1
-                markov_boundary_matrix[j, i] = 1
-            end
+            cond_set = setdiff(1:num_vars, (i, j))
+            @inbounds markov_boundary_matrix[i, j] = markov_boundary_matrix[j, i] = !ci_test(i, j, cond_set, data)
         end
     end
-
-    return markov_boundary_matrix
 end
 
 """
-RSLBase Class for learning graph structure.
+RSL class for learning graph structure.
 
 # Fields
-- `data`: The dataset.
-- `ci_test`: The conditional independence test function.
-- Other fields for storing intermediate results and the learned graph.
+- `data`: The data from which to learn the graph.
+- `ci_test`: The conditional independence test function to use. Must have the signature `ci_test(var1::String, var2::String, cond_set::Vector{String}, data::DataFrame)`.
+- `markov_boundary_matrix`: Matrix indicating whether variable i is in the Markov boundary of j.
+- `skip_rem_check_vec`: Used to keep track of which variables to skip when checking for removability. Speeds up the algorithm.
 """
-mutable struct RSL
-    data::DataFrame
-    ci_test
-    var_names::Vector{String}
-    markov_boundary_matrix::Matrix{Int}
-    flag_arr::Vector{Bool}
+struct RSL
+    data::Matrix{Float64}
+    ci_test::Function
+    markov_boundary_matrix::BitMatrix
+    skip_rem_check_vec::BitVector
 
-    function RSL(data::DataFrame, ci_test)
+    function RSL(data::Matrix{Float64}, ci_test::Function)
         num_vars = size(data, 2)
-        new(data, ci_test, names(data), zeros(Int, num_vars, num_vars), fill(true, num_vars))
-        # Initialize other fields as needed
+        new(Float64.(data), ci_test, falses(num_vars, num_vars), falses(num_vars))
     end
 end
 
-
 """
-    learn_and_get_skeleton!(rsl::RSLBase, data::DataFrame)
+    learn_and_get_skeleton(data, ci_test)::Graph
 
 Runs the algorithm on the data to learn and return the learned skeleton graph.
 
 # Arguments
-- `rsl::RSLBase`: The RSLBase instance.
+- `rsl::RSL`: The RSL object.
 - `data::DataFrame`: The data on which to run the algorithm.
 
 # Returns
-- `Graph`: The learned graph skeleton.
+- `Graph`: The learned graph skeleton.f
 """
-function reset_rsl!(rsl::RSL, data::DataFrame)
-    rsl.data = data
-    num_vars = size(data, 2)
-    rsl.var_names = names(data)
-    rsl.flag_arr = fill(true, num_vars)
-    rsl.markov_boundary_matrix = zeros(Int, num_vars, num_vars)
-end
+function learn_and_get_skeleton(data, ci_test::Function; mkbd_ci_test::Function=ci_test)::SimpleGraph
+    Tables.istable(data) || throw(ArgumentError("Argument does not support Tables.jl"))
+    data_mat = Tables.matrix(data)
+    num_vars = size(data_mat, 2)
 
-function learn_and_get_skeleton!(rsl::RSL, data::DataFrame)
-    reset_rsl!(rsl, data)
+    rsl = RSL(data_mat, ci_test)
 
     # Initialize graph with node names corresponding to variables
-    skeleton = SimpleGraph(length(rsl.var_names))
+    skeleton = SimpleGraph(num_vars)
 
-    rsl.markov_boundary_matrix = find_markov_boundary_matrix(rsl.data, rsl.ci_test)
+    # Compute the Markov boundary matrix
+    find_markov_boundary_matrix!(rsl.markov_boundary_matrix, rsl.data, mkbd_ci_test)
 
-    var_idx_left_set = Set(1:length(rsl.var_names))
-    # repeat for the number of variables
-    for i in 1:length(rsl.var_names)
-        # Find a removable variable
-        removable_var_idx = find_removable(rsl, collect(var_idx_left_set))
+    var_arr = 1:num_vars
+    var_left_bool_arr = trues(num_vars)  # if ith position is True, indicates that i is left
 
-        # Find the neighbors of the removable variable
-        neighbors = find_neighborhood(rsl, removable_var_idx)
+    for i in 1:(num_vars - 1)
+        # only consider variables that are left and have skip check set to False
+        var_to_check_arr = var_arr[var_left_bool_arr .& .!rsl.skip_rem_check_vec]
 
-        # Update the Markov boundary matrix
-        update_markov_boundary_matrix(rsl, removable_var_idx, neighbors)
+        # sort the variables by the size of their markov boundary
+        mb_size = sum(rsl.markov_boundary_matrix[:, var_to_check_arr], dims = 1)[1, :]
+        sort_indices = sortperm(mb_size)
+        sorted_var_arr = var_to_check_arr[sort_indices]
 
-        # Add edges between the removable variable and its neighbors
-        for neighbor_idx in neighbors
-            add_edge!(skeleton, removable_var_idx, neighbor_idx)
+        # find a removable variable
+        removable_var = find_removable!(rsl, sorted_var_arr)
+
+        if removable_var == REMOVABLE_NOT_FOUND
+            # if no removable found, then pick the variable with the smallest markov boundary from var_left_bool_arr
+            var_left_arr = findall(var_left_bool_arr)
+            mb_size_all = sum(rsl.markov_boundary_matrix[var_left_arr, :], dims = 2)
+            removable_var = var_left_arr[argmin(mb_size_all)]
+
+            rsl.skip_rem_check_vec .= false
         end
 
-        # Remove the removable variable from the set of variables left
-        delete!(var_idx_left_set, removable_var_idx)
+        # find the neighbors of the removable variable
+        neighbors = find_neighborhood(rsl, removable_var)
+
+        # update the markov boundary matrix
+        update_markov_boundary_matrix!(rsl, removable_var, neighbors)
+
+        # add edges between the removable variable and its neighbors
+        for neighbor_idx in neighbors
+            add_edge!(skeleton, removable_var, neighbor_idx)
+        end
+
+        # remove the removable variable from the set of variables left
+        var_left_bool_arr[removable_var] = false
     end
 
-    rsl.learned_skeleton = skeleton
     return skeleton
 end
 
+"""
+Find the neighborhood of a variable using Lemma 4 of the rsl paper.
 
-function find_neighborhood(rsl, var_idx::Int)::Vector{Int}
-    """
-    Find the neighborhood of a variable using Lemma 4 of the rsl paper.
+# Arguments
+- `var_idx::Int`: Index of the variable in the data.
 
-    # Arguments
-    - `var_idx::Int`: Index of the variable in the data.
-
-    # Returns
-    - `Vector{Int}`: Array containing the indices of the variables in the neighborhood.
-    """
-
-    var_name = rsl.var_names[var_idx]
-    var_mk_arr = rsl.markov_boundary_matrix[var_idx, :]
-    var_mk_idxs = findall(x -> x != 0, var_mk_arr)
+# Returns
+- `Vector{Int}`: Array containing the indices of the variables in the neighborhood.
+"""
+function find_neighborhood(rsl::RSL, var_idx::Int)::Vector{Int}
+    var_mk_arr = @view rsl.markov_boundary_matrix[:, var_idx]
+    var_mk_idxs = findall(var_mk_arr)
 
     # Assume all variables are neighbors initially
     neighbors = copy(var_mk_arr)
 
-    for mb_idx_y in 1:length(var_mk_idxs)
-        for mb_idx_z in 1:length(var_mk_idxs)
-            if mb_idx_y == mb_idx_z
+    for var_y in var_mk_idxs
+        for var_z in var_mk_idxs
+            if var_y == var_z
                 continue
             end
-            var_y_idx = var_mk_idxs[mb_idx_y]
-            var_z_idx = var_mk_idxs[mb_idx_z]
-            var_y_name = rsl.var_names[var_y_idx]
-            cond_set = [rsl.var_names[idx] for idx in setdiff(var_mk_idxs, [var_y_idx, var_z_idx])]
+            cond_set = setdiff(var_mk_idxs, [var_y, var_z])
 
-            if rsl.ci_test(var_name, var_y_name, cond_set, rsl.data)
-                # var2 is a co-parent and thus NOT a neighbor
-                neighbors[var_y_idx] = 0
+            if rsl.ci_test(var_idx, var_y, cond_set, rsl.data)
+                # var_y is a co-parent and thus NOT a neighbor
+                neighbors[var_y] = 0
                 break
             end
         end
@@ -157,110 +153,93 @@ function find_neighborhood(rsl, var_idx::Int)::Vector{Int}
     return neighbors_idx_arr
 end
 
+"""
+Check whether a variable is removable using Lemma 3 of the rsl paper.
 
+# Arguments
+- `var_idx::Int`: Index of the variable.
+
+# Returns
+- `Bool`: True if the variable is removable, False otherwise.
+"""
 function is_removable(rsl, var_idx::Int)::Bool
-    """
-    Check whether a variable is removable using Lemma 3 of the rsl paper.
-
-    # Arguments
-    - `var_idx::Int`: Index of the variable.
-
-    # Returns
-    - `Bool`: True if the variable is removable, False otherwise.
-    """
-
-    var_mk_arr = rsl.markov_boundary_matrix[var_idx, :]
-    var_mk_idxs = findall(x -> x != 0, var_mk_arr)
+    var_mk_arr = @view rsl.markov_boundary_matrix[:, var_idx]
+    var_mk_idxs = findall(var_mk_arr)
 
     # Use Lemma 3 of rsl paper: var_y_idx is Y and var_z_idx is Z. cond_set is Mb(X) + {X} - {Y, Z}
-    for mb_idx_y in 1:(length(var_mk_idxs) - 1)  # -1 because no need to check last variable and also symmetry
+    @inbounds for mb_idx_y in 1:(length(var_mk_idxs) - 1)  # -1 because no need to check last variable and also symmetry
         for mb_idx_z in (mb_idx_y + 1):length(var_mk_idxs)
             var_y_idx = var_mk_idxs[mb_idx_y]
             var_z_idx = var_mk_idxs[mb_idx_z]
-            var_y_name = rsl.var_names[var_y_idx]
-            var_z_name = rsl.var_names[var_z_idx]
-            cond_set = [rsl.var_names[idx] for idx in setdiff(var_mk_idxs, [var_y_idx, var_z_idx])] 
-            push!(cond_set, rsl.var_names[var_idx])
+            cond_set = setdiff(var_mk_idxs, [var_y_idx, var_z_idx])
+            push!(cond_set, var_idx)
 
-            if rsl.ci_test(var_y_name, var_z_name, cond_set, rsl.data)
+            if rsl.ci_test(var_y_idx, var_z_idx, cond_set, rsl.data)
                 return false
             end
         end
     end
-
     return true
 end
 
-function find_removable(rsl::RSL, var_idx_list::Vector{Int})::Int
-    """
-    Find a removable variable in the given list of variables.
+"""
+Find a removable variable in the given list of variables.
 
-    # Arguments
-    - `var_idx_list::Vector{Int}`: List of variable indices.
+# Arguments
+- `var_idx_list::Vector{Int}`: List of variable indices.
 
-    # Returns
-    - `Int`: Index of the removable variable.
-    """
-
-    # Sort variables by the size of their Markov boundary
-    mb_size = sum(rsl.markov_boundary_matrix[var_idx_list, :], dims=2)[:,1]
-    sort_indices = sortperm(mb_size, alg=QuickSort, by=x->-x) # Sorting in descending order
-    sorted_var_idx = var_idx_list[sort_indices]
-
-    for var_idx in sorted_var_idx
-        if rsl.flag_arr[var_idx]
-            rsl.flag_arr[var_idx] = false
-            if is_removable(rsl, var_idx)
-                return var_idx
-            end
+# Returns
+- `Int`: Index of the removable variable.
+"""
+function find_removable!(rsl::RSL, var_idx_list::Vector{Int})::Int
+    for var_idx in var_idx_list
+        if is_removable(rsl, var_idx)
+            return var_idx
         end
+        rsl.skip_rem_check_vec[var_idx] = true
     end
-
-    # If no removable found, return the first variable
-    return sorted_var_idx[1]
+    return REMOVABLE_NOT_FOUND
 end
 
-function update_markov_boundary_matrix(rsl, var_idx::Int, var_neighbors::Vector{Int})
-    """
-    Update the Markov boundary matrix after removing a variable.
+"""
+Update the Markov boundary matrix after removing a variable.
 
-    # Arguments
-    - `var_idx::Int`: Index of the variable to remove.
-    - `var_neighbors::Vector{Int}`: Array containing the indices of the neighbors of var_idx.
-    """
-
-    var_markov_boundary = findall(x -> x != 0, rsl.markov_boundary_matrix[var_idx, :])
+# Arguments
+- `var_idx::Int`: Index of the variable to remove.
+- `var_neighbors::Vector{Int}`: Array containing the indices of the neighbors of var_idx.
+"""
+function update_markov_boundary_matrix!(rsl::RSL, var_idx::Int, var_neighbors::Vector{Int})
+    var_markov_boundary = findall(@view rsl.markov_boundary_matrix[:, var_idx])
 
     # For every variable in the Markov boundary of var_idx, remove it from the Markov boundary and update flag
     for mb_var_idx in var_markov_boundary
-        rsl.markov_boundary_matrix[mb_var_idx, var_idx] = 0
-        rsl.markov_boundary_matrix[var_idx, mb_var_idx] = 0
-        rsl.flag_arr[mb_var_idx] = true
+        rsl.markov_boundary_matrix[mb_var_idx, var_idx] = false
+        rsl.markov_boundary_matrix[var_idx, mb_var_idx] = false
+        rsl.skip_rem_check_vec[mb_var_idx] = false
     end
 
     # Find nodes whose co-parent status changes
     # Only remove Y from mkvb of Z if X is their ONLY common child and they are NOT neighbors
-    for ne_idx_y in 1:(length(var_neighbors) - 1)
+    @inbounds for ne_idx_y in 1:(length(var_neighbors) - 1)
         for ne_idx_z in (ne_idx_y + 1):length(var_neighbors)
             var_y_idx = var_neighbors[ne_idx_y]
             var_z_idx = var_neighbors[ne_idx_z]
-            var_y_name = rsl.var_names[var_y_idx]
-            var_z_name = rsl.var_names[var_z_idx]
 
-            var_y_markov_boundary = findall(x -> x != 0, rsl.markov_boundary_matrix[var_y_idx, :])
-            var_z_markov_boundary = findall(x -> x != 0, rsl.markov_boundary_matrix[var_z_idx, :])
+            var_y_markov_boundary = findall(rsl.markov_boundary_matrix[:, var_y_idx])
+            var_z_markov_boundary = findall(rsl.markov_boundary_matrix[:, var_z_idx])
 
-            if sum(rsl.markov_boundary_matrix[var_y_idx, :]) < sum(rsl.markov_boundary_matrix[var_z_idx, :])
-                cond_set = [rsl.var_names[idx] for idx in setdiff(var_y_markov_boundary, [var_z_idx])]
+            if sum(rsl.markov_boundary_matrix[:, var_y_idx]) < sum(rsl.markov_boundary_matrix[:, var_z_idx])
+                cond_set = setdiff(var_y_markov_boundary, [var_z_idx])
             else
-                cond_set = [rsl.var_names[idx] for idx in setdiff(var_z_markov_boundary, [var_y_idx])]
+                cond_set = setdiff(var_z_markov_boundary, [var_y_idx])
             end
 
-            if rsl.ci_test(var_y_name, var_z_name, cond_set, rsl.data)
-                rsl.markov_boundary_matrix[var_y_idx, var_z_idx] = 0
-                rsl.markov_boundary_matrix[var_z_idx, var_y_idx] = 0
-                rsl.flag_arr[var_y_idx] = true
-                rsl.flag_arr[var_z_idx] = true
+            if rsl.ci_test(var_y_idx, var_z_idx, cond_set, rsl.data)
+                # we know that Y and Z are co-parents and thus NOT neighbors
+                rsl.markov_boundary_matrix[var_y_idx, var_z_idx] = false
+                rsl.markov_boundary_matrix[var_z_idx, var_y_idx] = false
+                rsl.skip_rem_check_vec[var_y_idx] = false
+                rsl.skip_rem_check_vec[var_z_idx] = false
             end
         end
     end
