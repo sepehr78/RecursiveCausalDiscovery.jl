@@ -99,7 +99,7 @@ function learn_and_get_skeleton(data, ci_test::Function; mkbd_ci_test::Function=
             # if no removable found, then pick the variable with the smallest markov boundary from var_left_bool_arr
             var_left_arr = findall(var_left_bool_arr)
             mb_size_all = @views sum(rsl.markov_boundary_matrix[var_left_arr, :], dims = 2)
-            removable_var = @view var_left_arr[argmin(mb_size_all)]
+            removable_var = var_left_arr[argmin(mb_size_all)]
 
             rsl.skip_rem_check_vec .= false
         end
