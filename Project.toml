@@ -1,7 +1,7 @@
 name = "RecursiveCausalDiscovery"
 uuid = "96483cbc-aa6d-4394-9266-bb69d9075284"
 authors = ["Sepehr Elahi <elahisepehr@gmail.com>"]
-version = "0.2.0"
+version = "0.1.0"
 
 [deps]
 Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
