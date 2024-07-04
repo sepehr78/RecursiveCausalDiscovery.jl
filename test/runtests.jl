@@ -5,9 +5,6 @@ using Tables
 using CSV
 using Graphs
 
-# navigate with your shell in the main directory of the package
-# First run: using Pkg; Pkg.activate("."); using TestEnv; TestEnv.activate(); include("test/runtests.jl")
-# Second run: include("test/runtests.jl")
 
 function test_data(folder_name)
     matrix_data = CSV.read(joinpath(folder_name, "data.csv"), Tables.matrix)

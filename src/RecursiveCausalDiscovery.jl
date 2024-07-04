@@ -10,18 +10,17 @@ export learn_and_get_skeleton
 const global REMOVABLE_NOT_FOUND = -1
 
 """
-    find_markov_boundary_matrix!(maahrkov_boundary_matrix::Matrix{Int}, data, ci_test)
+    find_markov_boundary_matrix!(markov_boundary_matrix::BitMatrix, data::AbstractMatrix, ci_test::Function)
 
-Computes the Markov boundary matrix for all variables in-place.
+Compute the Markov boundary matrix for all variables in-place.
 
 # Arguments
-- `markov_boundary_matrix::Matrix{Int}`: Pre-allocated matrix to be updated.
-- `data::DataFrame`: DataFrame where each column is a variable.
-- `ci_test`: Conditional independence test to use.
+- `markov_boundary_matrix::BitMatrix`: Pre-allocated matrix to be updated.
+- `data::AbstractMatrix`: Data matrix where each column is a variable and rows are samples.
+- `ci_test::Function`: Conditional independence test to use.
 """
 function find_markov_boundary_matrix!(markov_boundary_matrix::BitMatrix, data::AbstractMatrix, ci_test::Function)
     num_vars = size(data, 2)
-    
     @threads for i in 1:(num_vars - 1)
         for j in (i + 1):num_vars
             cond_set = setdiff(1:num_vars, (i, j))
@@ -31,13 +30,15 @@ function find_markov_boundary_matrix!(markov_boundary_matrix::BitMatrix, data::A
 end
 
 """
-RSL class for learning graph structure.
+    RSL{T}
+
+Recursive Structure Learner (RSL) for learning graph structure.
 
 # Fields
-- `data`: The data from which to learn the graph.
-- `ci_test`: The conditional independence test function to use. Must have the signature `ci_test(var1::String, var2::String, cond_set::Vector{String}, data::DataFrame)`.
-- `markov_boundary_matrix`: Matrix indicating whether variable i is in the Markov boundary of j.
-- `skip_rem_check_vec`: Used to keep track of which variables to skip when checking for removability. Speeds up the algorithm.
+- `data::Matrix{T}`: The data from which to learn the graph.
+- `ci_test::Function`: The conditional independence test function to use.
+- `markov_boundary_matrix::BitMatrix`: Matrix indicating whether variable i is in the Markov boundary of j.
+- `skip_rem_check_vec::BitVector`: Used to keep track of which variables to skip when checking for removability.
 """
 struct RSL{T}
     data::Matrix{T}
@@ -51,19 +52,25 @@ struct RSL{T}
     end
 end
 
-
 """
-    learn_and_get_skeleton(data, ci_test)::Graph
+    learn_and_get_skeleton(data::AbstractMatrix, ci_test::Function; mkbd_ci_test::Function=ci_test)::SimpleGraph
+    learn_and_get_skeleton(data, ci_test::Function; mkbd_ci_test::Function=ci_test)::SimpleGraph
 
-Runs the algorithm on the data to learn and return the learned skeleton graph.
+Run the RSL algorithm on the data to learn and return the learned skeleton graph.
 
 # Arguments
-- `rsl::RSL`: The RSL object.
-- `data::DataFrame`: The data on which to run the algorithm.
+- `data`: The data on which to run the algorithm. Can be an AbstractMatrix or any type supporting Tables.jl interface. Columns should be variables and rows samples.
+- `ci_test::Function`: The conditional independence test function to use. Should have signature `ci_test(x::Int, y::Int, cond_set::Vector{Int}, data::Matrix{Float64}) -> Bool`.
+- `mkbd_ci_test::Function`: The conditional independence test function to use for Markov boundary discovery (default: `ci_test`).
 
 # Returns
-- `Graph`: The learned graph skeleton.f
+- `SimpleGraph`: The learned graph skeleton.
 """
+function learn_and_get_skeleton(data::AbstractMatrix, ci_test::Function; mkbd_ci_test::Function=ci_test)::SimpleGraph
+    learn_and_get_skeleton(Tables.table(data), ci_test; mkbd_ci_test=ci_test)
+end
+
+
 function learn_and_get_skeleton(data, ci_test::Function; mkbd_ci_test::Function=ci_test)::SimpleGraph
     Tables.istable(data) || throw(ArgumentError("Argument does not support Tables.jl"))
     data_mat = Tables.matrix(data)
@@ -120,13 +127,16 @@ function learn_and_get_skeleton(data, ci_test::Function; mkbd_ci_test::Function=
 end
 
 """
-Find the neighborhood of a variable using Lemma 4 of the rsl paper.
+    find_neighborhood(rsl::RSL, var_idx::Int)::Vector{Int}
+
+Find the neighborhood of a variable. Uses Lemma 4 of the RSL paper.
 
 # Arguments
-- `var_idx::Int`: Index of the variable in the data.
+- `rsl::RSL`: The RSL object.
+- `var_idx::Int`: Index of the variable in the data (i.e., column index in the data matrix)
 
 # Returns
-- `Vector{Int}`: Array containing the indices of the variables in the neighborhood.
+- `Vector{Int}`: Array containing the variables in the neighborhood.
 """
 function find_neighborhood(rsl::RSL, var_idx::Int)::Vector{Int}
     var_mk_arr = @view rsl.markov_boundary_matrix[:, var_idx]
@@ -151,18 +161,21 @@ function find_neighborhood(rsl::RSL, var_idx::Int)::Vector{Int}
     end
 
     # Remove all variables that are not neighbors
-    neighbors_idx_arr = findall(x -> x != 0, neighbors)
+    neighbors_idx_arr = findall(neighbors)
     return neighbors_idx_arr
 end
 
 """
-Check whether a variable is removable using Lemma 3 of the rsl paper.
+    is_removable(rsl::RSL, var_idx::Int)::Bool
+
+Check whether a variable is removable using Lemma 3 of the RSL paper.
 
 # Arguments
-- `var_idx::Int`: Index of the variable.
+- `rsl::RSL`: The RSL object.
+- `var_idx::Int`: Index of the variable to check.
 
 # Returns
-- `Bool`: True if the variable is removable, False otherwise.
+- `Bool`: `true` if the variable is removable, `false` otherwise.
 """
 function is_removable(rsl, var_idx::Int)::Bool
     var_mk_arr = @view rsl.markov_boundary_matrix[:, var_idx]
@@ -185,13 +198,16 @@ function is_removable(rsl, var_idx::Int)::Bool
 end
 
 """
+    find_removable!(rsl::RSL, var_idx_list::AbstractVector{Int})::Int
+
 Find a removable variable in the given list of variables.
 
 # Arguments
-- `var_idx_list::Vector{Int}`: List of variable indices.
+- `rsl::RSL`: The RSL object.
+- `var_idx_list::AbstractVector{Int}`: List of variable indices to check.
 
 # Returns
-- `Int`: Index of the removable variable.
+- `Int`: Index of the removable variable, or `REMOVABLE_NOT_FOUND` if no removable variable is found.
 """
 function find_removable!(rsl::RSL, var_idx_list::AbstractVector{Int})::Int
     for var_idx in var_idx_list
@@ -204,20 +220,26 @@ function find_removable!(rsl::RSL, var_idx_list::AbstractVector{Int})::Int
 end
 
 """
+    update_markov_boundary_matrix!(rsl::RSL, var_idx::Int, var_neighbors::AbstractVector{Int})
+
 Update the Markov boundary matrix after removing a variable.
 
 # Arguments
+- `rsl::RSL`: The RSL object.
 - `var_idx::Int`: Index of the variable to remove.
-- `var_neighbors::Vector{Int}`: Array containing the indices of the neighbors of var_idx.
+- `var_neighbors::AbstractVector{Int}`: Array containing the the neighbors of `var_idx`.
 """
 function update_markov_boundary_matrix!(rsl::RSL, var_idx::Int, var_neighbors::AbstractVector{Int})
     var_markov_boundary = findall(@view rsl.markov_boundary_matrix[:, var_idx])
 
     # For every variable in the Markov boundary of var_idx, remove it from the Markov boundary and update flag
-    for mb_var_idx in var_markov_boundary
-        rsl.markov_boundary_matrix[mb_var_idx, var_idx] = false
-        rsl.markov_boundary_matrix[var_idx, mb_var_idx] = false
-        rsl.skip_rem_check_vec[mb_var_idx] = false
+    rsl.markov_boundary_matrix[var_markov_boundary, var_idx] .= false
+    rsl.markov_boundary_matrix[var_idx, var_markov_boundary] .= false
+    rsl.skip_rem_check_vec[var_markov_boundary] .= false
+
+    if length(var_markov_boundary) > length(var_neighbors)
+        # Sufficient condition for diamond-free graphs
+        return
     end
 
     # Find nodes whose co-parent status changes

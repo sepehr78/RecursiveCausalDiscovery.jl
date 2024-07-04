@@ -9,14 +9,14 @@ export gen_er_dag_adj_mat, gen_gaussian_data, fisher_z, opt_fisher_z, f1_score
 """
     gen_er_dag_adj_mat(num_vars::Int, edge_prob::Float64)
 
-Generate an Erdos-Renyi DAG with a given number of variables and edge probability.
+Generate an Erdos-Renyi Directed Acyclic Graph (DAG) with a given number of variables and edge probability.
 
 # Arguments
 - `num_vars::Int`: Number of variables.
 - `edge_prob::Float64`: Probability of an edge between any two variables.
 
 # Returns
-- `Array{Int, 2}`: Adjacency matrix of the generated DAG.
+- `Matrix{Int}`: Adjacency matrix of the generated DAG.
 """
 function gen_er_dag_adj_mat(num_vars::Int, edge_prob::Float64)
     # Generate a random upper triangular matrix
@@ -35,39 +35,40 @@ function gen_er_dag_adj_mat(num_vars::Int, edge_prob::Float64)
 end
 
 """
-    gen_gaussian_data(dag_adj_mat::Matrix{Int}, num_samples::Int)
+    gen_gaussian_data(dag_adj_mat::Matrix{Int}, num_samples::Int)::Matrix{Float64}
 
-Generate random Gaussian samples for each variable from a given DAG.
+Generate random Gaussian samples for each variable from a given Directed Acyclic Graph (DAG).
 
 # Arguments
 - `dag_adj_mat::Matrix{Int}`: The adjacency matrix of the DAG.
 - `num_samples::Int`: Number of samples to generate for each variable.
 
 # Returns
-- `DataFrame`: A DataFrame with the generated samples.
+- `Matrix{Float64}`: A matrix with the generated samples. Each row represents a sample, and each column represents a variable.
 """
-function gen_gaussian_data(dag_adj_mat::Matrix{Int}, num_samples::Int)
+function gen_gaussian_data(dag_adj_mat::Matrix{Int}, num_samples::Int)::Matrix{Float64}
     n = size(dag_adj_mat, 2)
     noise = randn(num_samples, n) * Diagonal(0.7 .+ 0.5 .* rand(n))
-    B = transpose(dag_adj_mat) .* ((1 .+ 0.5 .* rand(n)) .* ((-1) .^ (rand(n) .> 0.5)))
-    D = noise / (I - transpose(B))
+    B = dag_adj_mat' .* ((1 .+ 0.5 .* rand(n)) .* ((-1) .^ (rand(n) .> 0.5)))
+    D = noise * pinv(I - B')
     return D
 end
 
-"""
-    fisher_z(x_name::String, y_name::String, s::Vector{String}, data_df::DataFrame, significance_level::Float64=0.01)
 
-Test for conditional independence between variables X and Y given a set Z in dataset D.
+"""
+    fisher_z(x_idx::Int, y_idx::Int, s::Vector{Int}, data_mat_all::Matrix{Float64}, significance_level::Float64=0.01)
+
+Test for conditional independence between variables X and Y given a set Z in dataset D using Fisher's Z-test.
 
 # Arguments
-- `x_name::String`: Name of the first variable.
-- `y_name::String`: Name of the second variable.
-- `s::Vector{String}`: A list of names for variables in the conditioning set.
-- `data_df::DataFrame`: A DataFrame of data.
-- `significance_level::Float64`: The significance level for the test.
+- `x_idx::Int`: Index of the first variable.
+- `y_idx::Int`: Index of the second variable.
+- `s::Vector{Int}`: A list of indices for variables in the conditioning set.
+- `data_mat_all::Matrix{Float64}`: The full dataset matrix with rows as samples and columns as variables.
+- `significance_level::Float64`: The significance level for the test (default: 0.01).
 
 # Returns
-- `Bool`: `true` if conditionally independent, `false` otherwise.
+- `Bool`: `true` if `x_idx` conditionally independent from `y_idx` given `s`, `false` otherwise.
 """
 function fisher_z(x_idx::Int, y_idx::Int, s::Vector{Int}, data_mat_all::Matrix{Float64}, significance_level::Float64=0.01)
     # Number of samples
@@ -80,6 +81,9 @@ function fisher_z(x_idx::Int, y_idx::Int, s::Vector{Int}, data_mat_all::Matrix{F
     R = cor(data_mat)
     P = inv(R)
 
+    # R_sep = compute_correlation_matrix(data_mat)
+    # P_sep = inv(R_sep)
+
     # Calculate the partial correlation coefficient and Fisher Z-transform
     ro = -P[1, 2] / sqrt(P[1, 1] * P[2, 2])
     zro = 0.5 * log((1 + ro) / (1 - ro))
@@ -89,6 +93,22 @@ function fisher_z(x_idx::Int, y_idx::Int, s::Vector{Int}, data_mat_all::Matrix{F
     return abs(zro) < c / sqrt(n - length(s) - 3)
 end
 
+"""
+    opt_fisher_z(x_idx::Int, y_idx::Int, s::Vector{Int}, num_samples::Int, precision_mat::Matrix{Float64}, significance_level::Float64=0.01)
+
+Optimized version of Fisher's Z-test for conditional independence using a pre-computed precision matrix.
+
+# Arguments
+- `x_idx::Int`: Index of the first variable.
+- `y_idx::Int`: Index of the second variable.
+- `s::Vector{Int}`: A list of indices for variables in the conditioning set.
+- `num_samples::Int`: Number of samples in the dataset.
+- `precision_mat::Matrix{Float64}`: Pre-computed precision matrix.
+- `significance_level::Float64`: The significance level for the test (default: 0.01).
+
+# Returns
+- `Bool`: `true` if `x_idx` conditionally independent from `y_idx` given `s`, `false` otherwise.
+"""
 function opt_fisher_z(x_idx::Int, y_idx::Int, s::Vector{Int}, num_samples::Int, precision_mat::Matrix{Float64}, significance_level::Float64=0.01)
     # Select rows and columns from the precision matrix corresponding to X, Y, and Z from the dataset
     P = precision_mat[[x_idx, y_idx, s...], :][:, [x_idx, y_idx, s...]]
@@ -103,6 +123,18 @@ function opt_fisher_z(x_idx::Int, y_idx::Int, s::Vector{Int}, num_samples::Int, 
 end
 
 
+"""
+    f1_score(true_graph::Graph, predicted_graph::Graph)::Float64
+
+Calculate the F1 score between the true graph and the predicted graph with respect to the edges.
+
+# Arguments
+- `true_graph::Graph`: The true graph.
+- `predicted_graph::Graph`: The predicted graph.
+
+# Returns
+- `Float64`: The F1 score.
+"""
 function f1_score(true_graph::Graph, predicted_graph::Graph)::Float64
     true_edges = Set(Graphs.edges(true_graph))
     predicted_edges = Set(Graphs.edges(predicted_graph))
