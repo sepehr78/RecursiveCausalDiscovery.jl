@@ -16,5 +16,6 @@ identifiers:
     value: 2403.09300
   - type: url
     value: "https://arxiv.org/abs/2403.09300"
-preferred-citation: article
+preferred-citation:
+  type: article
 version: "1.0.0"

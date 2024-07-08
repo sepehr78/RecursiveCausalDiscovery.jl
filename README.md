@@ -4,6 +4,7 @@ A Julia implementation of [Recursive Causal Discovery](https://arxiv.org/abs/240
 
 #### ⚠️ This package is still under development! ⚠️
 [![CI](https://github.com/sepehr78/RecursiveCausalDiscovery.jl/actions/workflows/ci.yml/badge.svg)](https://github.com/sepehr78/RecursiveCausalDiscovery.jl/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/github/sepehr78/RecursiveCausalDiscovery.jl/graph/badge.svg?token=ELQDCTLFCT)](https://codecov.io/github/sepehr78/RecursiveCausalDiscovery.jl)
 
 # Overview
 ### Comparison of RCD with the PC algorithm implemented in [CausalInference.jl](https://github.com/mschauer/CausalInference.jl)
