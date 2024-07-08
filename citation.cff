@@ -1,6 +1,7 @@
 cff-version: 1.2.0
-message: "If you use this code, please cite the following work."
-title: "Recursive Causal Discovery"
+title: Recursive Causal Discovery
+message: 'If you use this code, please cite the following work.'
+type: software
 authors:
   - family-names: Mokhtarian
     given-names: Ehsan
@@ -10,12 +11,7 @@ authors:
     given-names: Sina
   - family-names: Kiyavash
     given-names: Negar
-date-released: 2024
 identifiers:
-  - type: arXiv
-    value: 2403.09300
   - type: url
-    value: "https://arxiv.org/abs/2403.09300"
-preferred-citation:
-  type: article
-version: "1.0.0"
+    value: 'https://arxiv.org/abs/2403.09300'
+    description: ArXiv link
