@@ -26,3 +26,8 @@ Manifest.toml
 **/.DS_Store
 # ignore .vscode
 .vscode/
+simulations/.CondaPkg/
+
+simulations/
+
+examples/rsl_example.jl
