@@ -9,7 +9,7 @@ A Julia implementation of [Recursive Causal Discovery](https://arxiv.org/abs/240
 # Overview
 ### Comparison of RCD with the PC algorithm implemented in [CausalInference.jl](https://github.com/mschauer/CausalInference.jl)
 The following plots show the F1 score (computed using true causal graph), and number of conditional independency (CI) tests done.
-![F1 score and #CI tests of RSL versus PC](https://i.ibb.co/sWKP8jM/SCR-20240708-sgii.png)
+![F1 score and #CI tests of RSL versus PC](rcd_vs_pc.png)
 
 ### Implemented algorithms
  - [x] Recursive Structure Learning (RSL)
