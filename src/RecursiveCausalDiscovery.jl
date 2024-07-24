@@ -1,11 +1,12 @@
 module RecursiveCausalDiscovery
 include("utils.jl")
+include("meek.jl")
 using Graphs
 using Tables
 using LinearAlgebra
 using Base.Threads
 
-export learn_and_get_skeleton
+export rsld
 
 const global REMOVABLE_NOT_FOUND = -1
 
@@ -19,12 +20,14 @@ Compute the Markov boundary matrix for all variables in-place.
 - `data::AbstractMatrix`: Data matrix where each column is a variable and rows are samples.
 - `ci_test::Function`: Conditional independence test to use.
 """
-function find_markov_boundary_matrix!(markov_boundary_matrix::BitMatrix, data::AbstractMatrix, ci_test::Function)
+function find_markov_boundary_matrix!(
+        markov_boundary_matrix::BitMatrix, data::AbstractMatrix, ci_test::Function)
     num_vars = size(data, 2)
     @threads for i in 1:(num_vars - 1)
         for j in (i + 1):num_vars
             cond_set = setdiff(1:num_vars, (i, j))
-            @inbounds markov_boundary_matrix[i, j] = markov_boundary_matrix[j, i] = !ci_test(i, j, cond_set, data)
+            @inbounds markov_boundary_matrix[i, j] = markov_boundary_matrix[j, i] = !ci_test(
+                i, j, cond_set, data)
         end
     end
 end
@@ -46,32 +49,36 @@ struct RSL{T, F}
     markov_boundary_matrix::BitMatrix
     skip_rem_check_vec::BitVector
 
-    function RSL(data::Matrix{T}, ci_test::Function) where T
+    function RSL(data::Matrix{T}, ci_test::Function) where {T}
         num_vars = size(data, 2)
-        new{T, typeof(ci_test)}(data, ci_test, falses(num_vars, num_vars), falses(num_vars))
+        return new{T, typeof(ci_test)}(
+            data, ci_test, falses(num_vars, num_vars), falses(num_vars)
+        )
     end
 end
 
 """
-    learn_and_get_skeleton(data::AbstractMatrix, ci_test::Function; mkbd_ci_test::Function=ci_test)::SimpleGraph
-    learn_and_get_skeleton(data, ci_test::Function; mkbd_ci_test::Function=ci_test)::SimpleGraph
+    rsld(data::AbstractMatrix, ci_test::Function; mkbd_ci_test::Function=ci_test)::SimpleDiGraph
+    rsld(data, ci_test::Function; mkbd_ci_test::Function=ci_test)::SimpleDiGraph
 
-Run the RSL algorithm on the data to learn and return the learned skeleton graph.
+Run the RSL-D algorithm on the data to learn and return the learned partially directed acyclic graph (PDAG).
 
 # Arguments
 - `data`: The data on which to run the algorithm. Can be an AbstractMatrix or any type supporting Tables.jl interface. Columns should be variables and rows samples.
 - `ci_test::Function`: The conditional independence test function to use. Should have signature `ci_test(x::Int, y::Int, cond_set::Vector{Int}, data::Matrix{Float64}) -> Bool`.
+- `orient_edges::Bool`: Whether to orient the edges further using Meek rules (default: `true`).
 - `mkbd_ci_test::Function`: The conditional independence test function to use for Markov boundary discovery (default: `ci_test`).
 
 # Returns
-- `SimpleGraph`: The learned graph skeleton.
+- `SimpleDiGraph`: The learned PDAG.
 """
-function learn_and_get_skeleton(data::AbstractMatrix, ci_test::Function; mkbd_ci_test::Function=ci_test)::SimpleGraph
-    learn_and_get_skeleton(Tables.table(data), ci_test; mkbd_ci_test=ci_test)
+function rsld(data::AbstractMatrix, ci_test::Function, orient_edges = true;
+        mkbd_ci_test::Function = ci_test)::SimpleDiGraph
+    return rsld(Tables.table(data), ci_test, orient_edges; mkbd_ci_test = ci_test)
 end
 
-
-function learn_and_get_skeleton(data, ci_test::Function; mkbd_ci_test::Function=ci_test)::SimpleGraph
+function rsld(data, ci_test::Function, orient_edges = true;
+        mkbd_ci_test::Function = ci_test)::SimpleDiGraph
     Tables.istable(data) || throw(ArgumentError("Argument does not support Tables.jl"))
     data_mat = Tables.matrix(data)
     num_vars = size(data_mat, 2)
@@ -79,20 +86,25 @@ function learn_and_get_skeleton(data, ci_test::Function; mkbd_ci_test::Function=
     rsl = RSL(data_mat, ci_test)
 
     # Initialize graph with node names corresponding to variables
-    skeleton = SimpleGraph(num_vars)
+    pc_dag = SimpleDiGraph(num_vars)
+
+    # auxilary vector used to store extra info in find_neighbors and update_markov_boundary_matrix
+    aux_vec = zeros(Int, num_vars)
 
     # Compute the Markov boundary matrix
     find_markov_boundary_matrix!(rsl.markov_boundary_matrix, rsl.data, mkbd_ci_test)
 
     var_arr = 1:num_vars
     var_left_bool_arr = trues(num_vars)  # if ith position is True, indicates that i is left
+    var_removed_bool_arr = falses(num_vars)  # if ith position is True, indicates that i is removed
 
     for i in 1:(num_vars - 1)
         # only consider variables that are left and have skip check set to False
         var_to_check_arr = @views var_arr[var_left_bool_arr .& .!rsl.skip_rem_check_vec]
 
         # sort the variables by the size of their markov boundary
-        mb_size = @views sum(rsl.markov_boundary_matrix[:, var_to_check_arr], dims = 1)[1, :]
+        mb_size = @views sum(rsl.markov_boundary_matrix[:, var_to_check_arr]; dims = 1)[
+            1, :]
         sort_indices = sortperm(mb_size)
         sorted_var_arr = @views var_to_check_arr[sort_indices]
 
@@ -109,36 +121,129 @@ function learn_and_get_skeleton(data, ci_test::Function; mkbd_ci_test::Function=
         end
 
         # find the neighbors of the removable variable
-        neighbors = find_neighborhood(rsl, removable_var)
+        # aux_vec[i] is a common child of removable_var and i (removable_var -> aux_vec[i] <- i)
+        aux_vec .= 0
+        neighbors = find_neighbors!(rsl, removable_var, aux_vec)
+        
+        if orient_edges
+        # add directed edges between co-parents and child and update v-structures
+            for (coparent_idx, child_idx) in enumerate(aux_vec)
+                if child_idx != 0
+                    add_edge_pdag!(pc_dag, coparent_idx, child_idx, true)
+                    add_edge_pdag!(pc_dag, removable_var, child_idx, true)
+
+                    # since coparent and removable_var are NOT neighbors, check for previous v-structures
+                    update_v_structures!(pc_dag, var_removed_bool_arr, coparent_idx, removable_var)
+                end
+            end
+        end
 
         # update the markov boundary matrix
-        update_markov_boundary_matrix!(rsl, removable_var, neighbors)
+        # aux_vec[i] and i are parents of removable_var (aux_vec[i] -> removable_var <- i)
+        aux_vec .= 0
+        update_markov_boundary_matrix!(rsl, removable_var, neighbors, aux_vec)
 
-        # add edges between the removable variable and its neighbors
+        if orient_edges
+            # add directed edges between the parents and the removable variable, and update v-structures
+            for (coparent1, coparent2) in enumerate(aux_vec)
+                if coparent2 != 0
+                    add_edge_pdag!(pc_dag, coparent1, removable_var, true)
+                    add_edge_pdag!(pc_dag, coparent2, removable_var, true)
+                    
+                    # since coparent1 and coparent2 are NOT neighbors, check for previous v-structures
+                    update_v_structures!(pc_dag, var_removed_bool_arr, coparent1, coparent2)
+                end
+            end
+        end
+
+        # add undirected edges between the removable variable and its neighbors
         for neighbor_idx in neighbors
-            add_edge!(skeleton, removable_var, neighbor_idx)
+            add_edge_pdag!(pc_dag, removable_var, neighbor_idx, false)
         end
 
         # remove the removable variable from the set of variables left
         var_left_bool_arr[removable_var] = false
+        var_removed_bool_arr[removable_var] = true
     end
 
-    return skeleton
+    # apply meek rules to orient edges furhter
+    if orient_edges
+        meek_rules!(pc_dag)
+    end
+
+    return pc_dag
+end
+
+
+"""
+    update_v_structures!(pc_dag::DiGraph, removed_bool_vec::BitVector, var_y::Int, var_z::Int)
+
+Goes through removed variables and checks whether there are any v-structures given by var_y -> removed_var <- var_z. If so, orients the edge var_y -> removed_var and var_z -> removed_var. Note that var_y and var_z MUST NOT be adjacent.
+
+# Arguments
+- `pc_dag::DiGraph`: The graph to update.
+- `removed_bool_vec::BitVector`: Vector containing the removed variables.
+- `var_y::Int`: Index of variable Y, NOT a neighbor of `var_z`.
+- `var_z::Int`: Index of variable Z, NOT a neighbor of `var_y`.
+"""
+
+function update_v_structures!(pc_dag::DiGraph, removed_bool_vec::BitVector, var_y::Int, var_z::Int)
+    # for each removed variable, check whether BOTH var_y and var_z are neighbors of the removed variable
+    # if so, we have a v-structure and we need to orient the edge var_y -> removed_var <- var_z
+    for (removed_var, is_removed) in enumerate(removed_bool_vec)
+        if is_removed && isundirected(pc_dag, removed_var, var_y) && isundirected(pc_dag, removed_var, var_z)
+            orientedge!(pc_dag, var_y, removed_var)
+            orientedge!(pc_dag, var_z, removed_var)
+        end
+    end
+
+end
+
+
+"""
+    add_edge_pdag!(pc_dag::SimpleDiGraph, src::Int, dst::Int, is_directed::Bool)
+
+Add an edge to the graph. Directed edge takes precedence over undirected edge. If a directed edge is being added, the undirected edge (i.e, reverse direction) is removed. If an undirected edge is being added and a directed edge exists, the directed edge is kept.
+
+# Arguments
+- `pc_dag::SimpleDiGraph`: The graph to add the edge to.
+- `src::Int`: Source node.
+- `dst::Int`: Destination node.
+- `is_directed::Bool`: Whether the edge is directed.
+"""
+function add_edge_pdag!(pc_dag::SimpleDiGraph, src::Int, dst::Int, is_directed::Bool)
+    if is_directed
+        # check if a directed edge exists in the opposite direction. If so, throw error
+        if has_edge(pc_dag, dst, src) && !has_edge(pc_dag, src, dst)
+            # this should not happen, so it means CI test at some point gave an incorrect result
+            return
+        else
+            add_edge!(pc_dag, src, dst)
+            rem_edge!(pc_dag, dst, src)
+        end
+    else  # we are adding an undirected edge
+        # check if a directed edge exists
+        if !isoriented(pc_dag, src, dst)
+            add_edge!(pc_dag, src, dst)
+            add_edge!(pc_dag, dst, src)
+        end
+    end
 end
 
 """
-    find_neighborhood(rsl::RSL, var_idx::Int)::Vector{Int}
+    find_neighbors(rsl::RSL, var_idx::Int, common_child_arr::AbstractVector{Int})::Vector{Int}
 
-Find the neighborhood of a variable. Uses Lemma 4 of the RSL paper.
+Find the neighbors of a variable. Uses Lemma 4 of the RSL paper.
 
 # Arguments
 - `rsl::RSL`: The RSL object.
 - `var_idx::Int`: Index of the variable in the data (i.e., column index in the data matrix)
+- `common_child_arr::AbstractVector{Int}`: Vector to store the common child of the variable and its co-parents (used for orientation).
 
 # Returns
-- `Vector{Int}`: Array containing the variables in the neighborhood.
+- `Vector{Int}`: Vector containing the variables in the neighbors.
 """
-function find_neighborhood(rsl::RSL, var_idx::Int)::Vector{Int}
+function find_neighbors!(rsl::RSL, var_idx::Int, common_child_arr::AbstractVector{Int})::Vector{Int}
     var_mk_arr = @view rsl.markov_boundary_matrix[:, var_idx]
     var_mk_idxs = findall(var_mk_arr)
 
@@ -155,6 +260,10 @@ function find_neighborhood(rsl::RSL, var_idx::Int)::Vector{Int}
             if rsl.ci_test(var_idx, var_y, cond_set, rsl.data)
                 # var_y is a co-parent and thus NOT a neighbor
                 neighbors[var_y] = 0
+
+                # var_z is a common child of var_idx and var_y (var_idx -> var_z <- var_y)
+                # var_i at index i is a common child of var_idx and i (var_idx -> var_i <- i)
+                common_child_arr[var_y] = var_z
                 break
             end
         end
@@ -220,7 +329,7 @@ function find_removable!(rsl::RSL, var_idx_list::AbstractVector{Int})::Int
 end
 
 """
-    update_markov_boundary_matrix!(rsl::RSL, var_idx::Int, var_neighbors::AbstractVector{Int})
+    update_markov_boundary_matrix!(rsl::RSL, var_idx::Int, var_neighbors::AbstractVector{Int}, coparent_vec::AbstractVector{Int})
 
 Update the Markov boundary matrix after removing a variable.
 
@@ -228,8 +337,10 @@ Update the Markov boundary matrix after removing a variable.
 - `rsl::RSL`: The RSL object.
 - `var_idx::Int`: Index of the variable to remove.
 - `var_neighbors::AbstractVector{Int}`: Array containing the the neighbors of `var_idx`.
+- `coparent_vec::AbstractVector{Int}`: Vector to store which nodes are parents of the variable.
 """
-function update_markov_boundary_matrix!(rsl::RSL, var_idx::Int, var_neighbors::AbstractVector{Int})
+function update_markov_boundary_matrix!(
+        rsl::RSL, var_idx::Int, var_neighbors::AbstractVector{Int}, coparent_vec::AbstractVector{Int})
     var_markov_boundary = findall(@view rsl.markov_boundary_matrix[:, var_idx])
 
     # For every variable in the Markov boundary of var_idx, remove it from the Markov boundary and update flag
@@ -239,7 +350,7 @@ function update_markov_boundary_matrix!(rsl::RSL, var_idx::Int, var_neighbors::A
 
     if length(var_markov_boundary) > length(var_neighbors)
         # Sufficient condition for diamond-free graphs
-        return
+        return nothing
     end
 
     # Find nodes whose co-parent status changes
@@ -252,14 +363,18 @@ function update_markov_boundary_matrix!(rsl::RSL, var_idx::Int, var_neighbors::A
             var_y_markov_boundary = findall(@view rsl.markov_boundary_matrix[:, var_y_idx])
             var_z_markov_boundary = findall(@view rsl.markov_boundary_matrix[:, var_z_idx])
 
-            if @views sum(rsl.markov_boundary_matrix[:, var_y_idx]) < sum(rsl.markov_boundary_matrix[:, var_z_idx])
+            if @views sum(rsl.markov_boundary_matrix[:, var_y_idx]) <
+                      sum(rsl.markov_boundary_matrix[:, var_z_idx])
                 cond_set = setdiff(var_y_markov_boundary, [var_z_idx])
             else
                 cond_set = setdiff(var_z_markov_boundary, [var_y_idx])
             end
 
             if rsl.ci_test(var_y_idx, var_z_idx, cond_set, rsl.data)
-                # we know that Y and Z are co-parents and thus NOT neighbors
+                # we know that Y and Z are co-parents of X and thus NOT neighbors
+                coparent_vec[var_y_idx] = var_z_idx
+                
+                # remove Y and Z from each other's markov boundary
                 rsl.markov_boundary_matrix[var_y_idx, var_z_idx] = false
                 rsl.markov_boundary_matrix[var_z_idx, var_y_idx] = false
                 rsl.skip_rem_check_vec[var_y_idx] = false

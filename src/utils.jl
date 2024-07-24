@@ -46,14 +46,13 @@ Generate random Gaussian samples for each variable from a given Directed Acyclic
 # Returns
 - `Matrix{Float64}`: A matrix with the generated samples. Each row represents a sample, and each column represents a variable.
 """
-function gen_gaussian_data(dag_adj_mat::Matrix{Int}, num_samples::Int)::Matrix{Float64}
+function gen_gaussian_data(dag_adj_mat::AbstractMatrix{Int}, num_samples::Int)::AbstractMatrix{Float64}
     n = size(dag_adj_mat, 2)
     noise = randn(num_samples, n) * Diagonal(0.7 .+ 0.5 .* rand(n))
     B = dag_adj_mat' .* ((1 .+ 0.5 .* rand(n)) .* ((-1) .^ (rand(n) .> 0.5)))
     D = noise * pinv(I - B')
     return D
 end
-
 
 """
     fisher_z(x_idx::Int, y_idx::Int, s::Vector{Int}, data_mat_all::Matrix{Float64}, significance_level::Float64=0.01)
@@ -70,7 +69,8 @@ Test for conditional independence between variables X and Y given a set Z in dat
 # Returns
 - `Bool`: `true` if `x_idx` conditionally independent from `y_idx` given `s`, `false` otherwise.
 """
-function fisher_z(x_idx::Int, y_idx::Int, s::Vector{Int}, data_mat_all::Matrix{Float64}, significance_level::Float64=0.01)
+function fisher_z(x_idx::Int, y_idx::Int, s::Vector{Int},
+        data_mat_all::Matrix{Float64}, significance_level::Float64 = 0.01)
     # Number of samples
     n = size(data_mat_all, 1)
 
@@ -93,6 +93,7 @@ function fisher_z(x_idx::Int, y_idx::Int, s::Vector{Int}, data_mat_all::Matrix{F
     return abs(zro) < c / sqrt(n - length(s) - 3)
 end
 
+
 """
     opt_fisher_z(x_idx::Int, y_idx::Int, s::Vector{Int}, num_samples::Int, precision_mat::Matrix{Float64}, significance_level::Float64=0.01)
 
@@ -109,7 +110,8 @@ Optimized version of Fisher's Z-test for conditional independence using a pre-co
 # Returns
 - `Bool`: `true` if `x_idx` conditionally independent from `y_idx` given `s`, `false` otherwise.
 """
-function opt_fisher_z(x_idx::Int, y_idx::Int, s::Vector{Int}, num_samples::Int, precision_mat::Matrix{Float64}, significance_level::Float64=0.01)
+function opt_fisher_z(x_idx::Int, y_idx::Int, s::Vector{Int}, num_samples::Int,
+    precision_mat::Matrix{Float64}, significance_level::Float64 = 0.01)
     # Select rows and columns from the precision matrix corresponding to X, Y, and Z from the dataset
     P = precision_mat[[x_idx, y_idx, s...], :][:, [x_idx, y_idx, s...]]
 
@@ -122,33 +124,32 @@ function opt_fisher_z(x_idx::Int, y_idx::Int, s::Vector{Int}, num_samples::Int, 
     return abs(zro) < c / sqrt(num_samples - length(s) - 3)
 end
 
-
 """
-    f1_score(true_graph::Graph, predicted_graph::Graph)::Float64
+    f1_score(true_graph::AbstractGraph, predicted_graph::AbstractGraph)::Float64
 
 Calculate the F1 score between the true graph and the predicted graph with respect to the edges.
 
 # Arguments
-- `true_graph::Graph`: The true graph.
-- `predicted_graph::Graph`: The predicted graph.
+- `true_graph::AbstractGraph`: The true graph.
+- `predicted_graph::AbstractGraph`: The predicted graph.
 
 # Returns
 - `Float64`: The F1 score.
 """
-function f1_score(true_graph::Graph, predicted_graph::Graph)::Float64
+function f1_score(true_graph::AbstractGraph, predicted_graph::AbstractGraph)::Float64
     true_edges = Set(Graphs.edges(true_graph))
     predicted_edges = Set(Graphs.edges(predicted_graph))
-    
+
     true_positives = length(intersect(true_edges, predicted_edges))
     false_positives = length(setdiff(predicted_edges, true_edges))
     false_negatives = length(setdiff(true_edges, predicted_edges))
-    
+
     if true_positives == 0
         return 0.0
     end
-    
+
     precision = true_positives / (true_positives + false_positives)
     recall = true_positives / (true_positives + false_negatives)
-    
+
     return 2 * (precision * recall) / (precision + recall)
 end
