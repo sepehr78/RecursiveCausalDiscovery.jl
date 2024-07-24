@@ -28,7 +28,7 @@ julia> ]add RecursiveCausalDiscovery
 ```
 
 # How to use
-The package so far has only one algorithm implemented: RSL-D, which can be called using the `rsld` function. The function takes the data matrix/table and a conditional independence test function as input, and returns the complete partially oriented directed acyclic graph (CPDAG) as output.
+The package so far has only one algorithm implemented: RSL-D, which can be called using the `rsld` function. The function takes the data matrix/table and a conditional independence test function as input, and returns the completed partially oriented directed acyclic graph (CPDAG) as output.
 
 ## Simple example
 In this example, a csv file named `data.csv` is loaded, and the RSL-D algorithm is used to learn the CPDAG. The conditional independence test is based on the Fisher's Z-test.
