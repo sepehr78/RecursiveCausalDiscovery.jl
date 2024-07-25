@@ -68,3 +68,6 @@ If you do use this package, please cite our [work](https://arxiv.org/abs/2403.09
       url={https://arxiv.org/abs/2403.09300}, 
 }
 ```
+
+# Acknowledgement
+Thanks to [Felix Wechsler](https://github.com/roflmaostc) for helping me with Julia and pushing me to implement RCD in Julia.
