@@ -58,14 +58,15 @@ See the [examples/rsl_example_wo_data.jl](examples/rsl_example_wo_data.jl) for a
 If you do use this package, please cite our [work](https://arxiv.org/abs/2403.09300).
 
 ```bibtex
-@misc{mokhtarian2024rcd,
-      title={Recursive Causal Discovery}, 
-      author={Ehsan Mokhtarian and Sepehr Elahi and Sina Akbari and Negar Kiyavash},
-      year={2024},
-      eprint={2403.09300},
-      archivePrefix={arXiv},
-      primaryClass={cs.LG},
-      url={https://arxiv.org/abs/2403.09300}, 
+@article{JMLR:v26:24-0384,
+  author  = {Ehsan Mokhtarian and Sepehr Elahi and Sina Akbari and Negar Kiyavash},
+  title   = {Recursive Causal Discovery},
+  journal = {Journal of Machine Learning Research},
+  year    = {2025},
+  volume  = {26},
+  number  = {61},
+  pages   = {1--65},
+  url     = {http://jmlr.org/papers/v26/24-0384.html}
 }
 ```
 
